@@ -90,36 +90,45 @@ function getOldUserAccounts(identifier)
 end
 
 function processUsers()
+	local instances = 0
 	for _, identKey in ipairs(allIdentifiers) do
-		local alreadyDone = false
-		MySQL.Async.fetchAll('SELECT inventory, accounts FROM users WHERE identifier = @identifier', {
-			['@identifier'] = identKey
-		}, function(oldAccounts)
-			if oldAccounts ~= nil then
-				alreadyDone = true
-			end
-		end)
-		
-		if not alreadyDone then
-			inventTable = {}
-			accountTable = {}
-		
-			getOldInventory(identKey)
-			Wait(100)
-			getOldAccounts(identKey)
-			Wait(100)
-			getOldUserAccounts(identKey)
-			Wait(100)
-			
-			MySQL.Async.execute('UPDATE users SET inventory = @inventory, accounts = @accounts WHERE identifier = @identifier', {
-				['@inventory'] = json.encode(inventTable),
-				['@accounts'] = json.encode(accountTable),
-				['@identifier'] = identKey
-			}, function(rowsChanged)
-				currentCount = currentCount + 1
-				print("Processing " .. identKey .. " ^2" .. currentCount .. "/" .. totalCount .. "^0")
-			end)
+		while instances >= 80 do
+			Citizen.Wait(0)
 		end
+		Citizen.CreateThread(function()
+			instances = instances + 1
+			local alreadyDone = false
+			MySQL.Async.fetchAll('SELECT inventory, accounts FROM users WHERE identifier = @identifier', {
+				['@identifier'] = identKey
+			}, function(oldAccounts)
+				if oldAccounts ~= nil then
+					alreadyDone = true
+				end
+			end)
+			
+			if not alreadyDone then
+				inventTable = {}
+				accountTable = {}
+			
+				getOldInventory(identKey)
+				Wait(100)
+				getOldAccounts(identKey)
+				Wait(100)
+				getOldUserAccounts(identKey)
+				Wait(100)
+				
+				MySQL.Async.execute('UPDATE users SET inventory = @inventory, accounts = @accounts WHERE identifier = @identifier', {
+					['@inventory'] = json.encode(inventTable),
+					['@accounts'] = json.encode(accountTable),
+					['@identifier'] = identKey
+				}, function(rowsChanged)
+					currentCount = currentCount + 1
+					print("Processing " .. identKey .. " ^2" .. currentCount .. "/" .. totalCount .. "^0")
+				end)
+			end
+			instances = instances - 1
+		end)
+		Citizen.Wait(5)
 	end
 end
 
@@ -137,3 +146,61 @@ CreateThread(function()
 		end
 	end
 end)
+
+function migrateUser(identKey)
+	print("Migrando usuario...")
+	inventTable[identKey] = {}
+	accountTable[identKey] = {}
+	
+	getOldInventory2(identKey)
+	Wait(100)
+	getOldAccounts2(identKey)
+	Wait(100)
+	getOldUserAccounts2(identKey)
+	Wait(100)
+	
+	MySQL.Async.execute('UPDATE users SET inventory = @inventory, accounts = @accounts, migrado = 1 WHERE identifier = @identifier', {
+		['@inventory'] = json.encode(inventTable[identKey]),
+		['@accounts'] = json.encode(accountTable[identKey]),
+		['@identifier'] = identKey
+	}, function(rowsChanged)
+		currentCount = currentCount + 1
+		print("Processing " .. identKey .. " ^2" .. currentCount .. "/" .. totalCount .. "^0")
+	end)
+	print("Usuario migrado")
+end
+
+function getOldInventory2(identifier)
+	MySQL.Async.fetchAll('SELECT * FROM user_inventory WHERE identifier = @identifier', {
+		['@identifier'] = identifier
+	}, function(oldInvent)
+		if oldInvent ~= nil then
+			for _, databaseRow in ipairs(oldInvent) do
+				inventTable[identifier][databaseRow.item] = databaseRow.count
+			end
+		end
+	end)
+end
+
+function getOldAccounts2(identifier)
+	MySQL.Async.fetchAll('SELECT * FROM user_accounts WHERE identifier = @identifier', {
+		['@identifier'] = identifier
+	}, function(oldAccounts)
+		if oldAccounts ~= nil then
+			for _, databaseRow in ipairs(oldAccounts) do
+				accountTable[identifier][databaseRow.name] = databaseRow.money
+			end
+		end
+	end)
+end
+
+function getOldUserAccounts2(identifier)
+	MySQL.Async.fetchAll('SELECT bank, money FROM users WHERE identifier = @identifier', {
+		['@identifier'] = identifier
+	}, function(oldUserAccounts)
+		if oldUserAccounts ~= nil then
+			accountTable[identifier]['bank'] = oldUserAccounts[1].bank
+			accountTable[identifier]['money'] = oldUserAccounts[1].money
+		end
+	end)
+end

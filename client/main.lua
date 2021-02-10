@@ -214,14 +214,15 @@ end)
 
 RegisterNetEvent('esx:setWeaponTint')
 AddEventHandler('esx:setWeaponTint', function(weaponName, weaponTintIndex)
-	SetPedWeaponTintIndex(PlayerPedId(), weaponName, weaponTintIndex)
+	--print(weaponName .. " " .. "(" .. weaponTintIndex .. ").")
+	SetPedWeaponTintIndex(PlayerPedId(), GetHashKey(weaponName), weaponTintIndex)
 end)
 
 RegisterNetEvent('esx:removeWeapon')
 AddEventHandler('esx:removeWeapon', function(weaponName)
 	local playerPed = PlayerPedId()
 	RemoveWeaponFromPed(playerPed, weaponName)
-	SetPedAmmo(playerPed, weaponName, 0) -- remove leftover ammo
+	--SetPedAmmo(playerPed, weaponName, 0) -- remove leftover ammo
 end)
 
 RegisterNetEvent('esx:removeWeaponComponent')
@@ -255,6 +256,7 @@ AddEventHandler('esx:spawnVehicle', function(vehicle)
 
 		ESX.Game.SpawnVehicle(vehicle, playerCoords, playerHeading, function(vehicle)
 			TaskWarpPedIntoVehicle(playerPed, vehicle, -1)
+			TriggerServerEvent('shorty_slocks:transferOwner', GetVehicleNumberPlateText(vehicle), GetPlayerServerId(PlayerId()))
 		end)
 	else
 		TriggerEvent('chat:addMessage', { args = { '^1SYSTEM', 'Invalid vehicle model.' } })
@@ -405,7 +407,7 @@ CreateThread(function()
 	end
 end)
 
-CreateThread(function()
+--[[CreateThread(function()
 	while true do
 		Wait(0)
 
@@ -415,7 +417,7 @@ CreateThread(function()
 			end
 		end
 	end
-end)
+end)]]
 
 -- Disable wanted level
 if Config.DisableWantedLevel then
@@ -531,6 +533,7 @@ CreateThread(function()
 	-- wait for player to restore coords
 	while not isLoadoutLoaded do
 		Wait(1000)
+		--DK--print("loadout is not loaded")
 	end
 	
 	local previousCoords = vector3(ESX.PlayerData.coords.x, ESX.PlayerData.coords.y, ESX.PlayerData.coords.z)
@@ -544,6 +547,11 @@ CreateThread(function()
 		local playerPed = PlayerPedId()
 		local playerCoords = GetEntityCoords(playerPed)
 		local distance = #(playerCoords - previousCoords)
+
+		--DK--print("distance is: " .. distance .. ".")
+		--DK--print("previousCoords is: " .. previousCoords .. ".")
+		--DK--print("playerCoords is: " .. playerCoords .. ".")
+		--DK--print("formattedCoords is: " .. json.encode(formattedCoords) .. ".")
 
 		if distance > 10 then
 			previousCoords = playerCoords

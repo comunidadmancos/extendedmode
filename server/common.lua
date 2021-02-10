@@ -28,8 +28,56 @@ do
     ExM = processTable(ESX)
 end
 
+local blockedResources, callingResources, pendingMSG = {
+	["sm_darts"] = true,
+	["new_kepo_speaker"] = true
+}, {
+	lastModified = "",
+}, false
+
+
 AddEventHandler('esx:getSharedObject', function(cb)
+	local invRes = GetInvokingResource()
+	if invRes ~= nil then
+		--print("El resource ^3\"" .. invRes .. "\"^0 llamó a \"esx:getSharedObject\".")
+		callingResources[invRes] = { callingTime = os.date("%X"), blocked = false }
+		callingResources.lastModified = os.time()
+		pendingMSG = true
+		if blockedResources[invRes] then
+			--print("El resource ^3\"" .. invRes .. "\"^1FUE BLOQUEADO^0 y no recibió los datos de ESX.")
+			-- OPCIONES:
+			--return
+			callingResources[invRes].blocked = true
+			cb(nil)
+		end
+	end
 	cb(ESX)
+end)
+
+Citizen.CreateThread(function()
+	Citizen.Wait(3000)
+	while true do
+		if pendingMSG then
+			while pendingMSG do
+				if (os.time() - callingResources.lastModified) > 15 then
+					local msg = "^1LISTA DE RESOURCES QUE HAN LLAMADO A ESX:^0\n"
+					for k, v in pairs(callingResources) do
+						if k ~= "lastModified" then
+							local bm = "^2no^0"
+							if v.blocked then bm = "^1sí^0" end
+							msg = msg .. "   - " .. k .. " (TIEMPO: " .. v.callingTime .. ". BLOQUEADO: " .. bm .. ").\n"
+						end
+					end
+					print(msg)
+					pendingMSG = false
+					callingResources = { lastModified = "" }
+				else
+					Citizen.Wait(3000)
+				end
+			end
+		end
+		Citizen.Wait(1000)
+	end
 end)
 
 exports("getSharedObject", function()
@@ -41,8 +89,20 @@ exports("getExtendedModeObject", function()
 end)
 
 -- Globals to check if OneSync or Infinity for exclusive features
-ExM.IsOneSync = GetConvar('onesync_enabled', false) == 'true'
-ExM.IsInfinity = GetConvar('onesync_enableInfinity', false) == 'true'
+ExM.IsOneSync = ((GetConvar('onesync', false) == 'legacy') or (GetConvar('onesync', false) == 'on')) -- ExM.IsOneSync = GetConvar('onesync_enabled', false) == 'true'
+ExM.IsInfinity = GetConvar('onesync', false) == 'on' -- ExM.IsInfinity = GetConvar('onesync_enableInfinity', false) == 'true'
+
+Citizen.CreateThread(function()
+	if ExM.IsOneSync then
+		Citizen.Wait(20000)
+		print("ExM.IsOneSync = true")
+	end
+	
+	if ExM.IsInfinity then
+		Citizen.Wait(21000)
+		print("ExM.IsInfinity = true")
+	end
+end)
 
 ExM.DatabaseReady = false
 ExM.DatabaseType = nil

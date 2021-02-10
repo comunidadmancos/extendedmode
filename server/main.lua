@@ -5,6 +5,72 @@ AddEventHandler('esx:onPlayerJoined', function()
 	end
 end)
 
+local identifiers = {}
+
+AddEventHandler("esx:getSteamFromLicense", function(identifiers2)
+	local license
+	if identifiers2 ~= nil then
+		--print("ESX: " .. json.encode(identifiers2))
+		for k1,v1 in pairs(identifiers2) do
+			if string.sub(v1, 1, string.len("license:")) == "license:" then
+				license = v1
+				if identifiers[license] == nil then
+					MySQL.Async.fetchScalar("SELECT identifier FROM users WHERE license = @license ORDER BY date_modified DESC LIMIT 1", { ['license'] = license }, function(result)
+						local identifierCache = {}
+						--print("INPUT: " .. license .. ". OUTPUT: " .. result .. ".")
+						local valid = false
+						for _,v2 in ipairs(identifiers2) do
+							if string.sub(v2, 1, string.len("license:")) == "license:" then
+								identifierCache.license = v2
+								--print("LICENCIA: " .. v2 .. ".")
+							elseif string.sub(v2, 1, string.len("discord:")) == "discord:" then
+								identifierCache.discord = v2
+								--print("DISCORD: " .. v2 .. ".")
+								valid = true
+							elseif string.sub(v2, 1, string.len("ip:")) == "ip:" then
+								identifierCache.ip = v2
+								--print("IP: " .. v2 .. ".")
+							end
+						end
+						if license and string.match(result, "steam:") and valid then
+							identifiers[license] = {}
+							identifiers[license][1] = result
+							identifiers[license][2] = identifierCache.license
+							identifiers[license][3] = identifierCache.discord
+							identifiers[license][4] = identifierCache.ip
+							TriggerEvent("takeTheLicenses", identifiers[license])
+						end
+					end)
+				else
+					TriggerEvent("takeTheLicenses", identifiers[license])
+				end
+				break
+			end
+		end
+	end
+end)
+
+local modosteamoff = false
+
+Citizen.CreateThread(function()
+	while true do
+		if modosteamoff then
+			TriggerEvent("modosteamoff")
+		end
+		Citizen.Wait(0)
+	end
+end)
+
+Citizen.CreateThread(function()
+	Citizen.Wait(50)
+	RegisterCommand("modosteamoff", function()
+		modosteamoff = not modosteamoff
+		local estado = "^2ACTIVADO^0"
+		if not modosteamoff then estado = "^1DESACTIVADO^0" end
+		print("^1SCHEDULER:^0 Modo Steam Off " .. estado ..".")
+	end, true)
+end)
+
 function onPlayerJoined(playerId)
 	local identifier
 	local license
@@ -22,10 +88,15 @@ function onPlayerJoined(playerId)
 		if ESX.GetPlayerFromIdentifier(identifier) then
 			DropPlayer(playerId, ('there was an error loading your character!\nError code: identifier-active-ingame\n\nThis error is caused by a player on this server who has the same identifier as you have. Make sure you are not playing on the same Rockstar account.\n\nYour Rockstar identifier: %s'):format(identifier))
 		else
-			MySQL.Async.fetchScalar('SELECT 1 FROM users WHERE identifier = @identifier', {
+			MySQL.Async.fetchScalar('SELECT migrado FROM users WHERE identifier = @identifier', {
 				['@identifier'] = identifier
 			}, function(result)
-				if result then
+				if result ~= nil then
+					if not result then
+						migrateUser(identifier)
+						Citizen.Wait(1000)
+					end
+					print("Cargando usuario...")
 					loadESXPlayer(identifier, playerId)
 				else
 					local accounts = {}
@@ -34,10 +105,11 @@ function onPlayerJoined(playerId)
 						accounts[account] = money
 					end
 
-					MySQL.Async.execute('INSERT INTO users (accounts, identifier, license) VALUES (@accounts, @identifier, @license)', {
+					MySQL.Async.execute('INSERT INTO users (accounts, identifier, license, migrado) VALUES (@accounts, @identifier, @license, @migrado)', {
 						['@accounts'] = json.encode(accounts),
 						['@identifier'] = identifier,
-						['@license'] = license,						
+						['@license'] = license,
+						['@migrado'] = 2,
 					}, function(rowsChanged)
 						loadESXPlayer(identifier, playerId)
 					end)
@@ -210,7 +282,7 @@ function loadESXPlayer(identifier, playerId)
 			userData.coords = json.decode(result[1].position)
 		else
 			print('[ExtendedMode] [^3WARNING^7] Column "position" in "users" table is missing required default value. Using backup coords, fix your database.')
-			userData.coords = {x = -269.4, y = -955.3, z = 31.2, heading = 205.8}
+			userData.coords = Config.FirstSpawnCoords
 		end
 
 		-- Create Extended Player Object
@@ -250,9 +322,20 @@ end)
 RegisterNetEvent('esx:updateCoords')
 AddEventHandler('esx:updateCoords', function(coords)
 	local xPlayer = ESX.GetPlayerFromId(source)
-
+	--DK--print("llegamos 1")
 	if xPlayer then
+		--DK--print("llegamos 2. xPlayer:")
 		xPlayer.updateCoords(coords)
+		--DK--local xPlayer2 = {}
+		--DK--for k,v in pairs(xPlayer) do
+		--DK--	if type(xPlayer[k]) == "function" then
+		--DK--		--print(tostring(xPlayer[k]) .. " era una función y por lo tanto se eliminó de la tabla.")
+		--DK--		--xPlayer[k] = nil
+		--DK--	else
+		--DK--		xPlayer2[k] = v
+		--DK--	end
+		--DK--end
+		--DK--print(json.encode(xPlayer2))
 	end
 end)
 
@@ -280,6 +363,8 @@ AddEventHandler('esx:giveInventoryItem', function(target, type, itemName, itemCo
 				sourceXPlayer.removeInventoryItem(itemName, itemCount)
 				targetXPlayer.addInventoryItem   (itemName, itemCount)
 
+				loguearMySQL(sourceXPlayer.name, sourceXPlayer.identifier, "give_" .. type, itemCount, itemName, targetXPlayer.name, targetXPlayer.identifier)
+
 				sourceXPlayer.showNotification(_U('gave_item', itemCount, sourceItem.label, targetXPlayer.name))
 				targetXPlayer.showNotification(_U('received_item', itemCount, sourceItem.label, sourceXPlayer.name))
 			else
@@ -288,10 +373,27 @@ AddEventHandler('esx:giveInventoryItem', function(target, type, itemName, itemCo
 		else
 			sourceXPlayer.showNotification(_U('imp_invalid_quantity'))
 		end
+	elseif type == 'item_money' then
+		if itemCount > 0 and sourceXPlayer.getMoney() >= itemCount then
+
+			loguearMySQL(sourceXPlayer.name, sourceXPlayer.identifier, "give_cash", itemCount, itemName, targetXPlayer.name, targetXPlayer.identifier)
+
+			sourceXPlayer.removeMoney(itemCount)
+			targetXPlayer.addMoney   (itemCount)
+
+			sourceXPlayer.showNotification(_U('gave_money', ESX.Math.GroupDigits(itemCount), targetXPlayer.name))
+			targetXPlayer.showNotification(_U('received_money', ESX.Math.GroupDigits(itemCount), sourceXPlayer.name))
+		else
+			sourceXPlayer.showNotification(_U('imp_invalid_amount'))
+		end
+
 	elseif type == 'item_account' then
 		if itemCount > 0 and sourceXPlayer.getAccount(itemName).money >= itemCount then
+
 			sourceXPlayer.removeAccountMoney(itemName, itemCount)
 			targetXPlayer.addAccountMoney   (itemName, itemCount)
+
+			loguearMySQL(sourceXPlayer.name, sourceXPlayer.identifier, "give_account_" .. itemName, itemCount, itemName, targetXPlayer.name, targetXPlayer.identifier)
 
 			sourceXPlayer.showNotification(_U('gave_account_money', ESX.Math.GroupDigits(itemCount), Config.Accounts[itemName], targetXPlayer.name))
 			targetXPlayer.showNotification(_U('received_account_money', ESX.Math.GroupDigits(itemCount), Config.Accounts[itemName], sourceXPlayer.name))
@@ -305,10 +407,31 @@ AddEventHandler('esx:giveInventoryItem', function(target, type, itemName, itemCo
 			if not targetXPlayer.hasWeapon(itemName) then
 				local _, weapon = sourceXPlayer.getWeapon(itemName)
 				local _, weaponObject = ESX.GetWeapon(itemName)
+				local components = {}
+				for i = 1, #weapon.components do
+					table.insert(components, weapon.components[i])
+				end
 				itemCount = weapon.ammo
 
-				sourceXPlayer.removeWeapon(itemName)
+				loguearMySQL(sourceXPlayer.name, sourceXPlayer.identifier, "give_" .. type, itemCount, itemName .. (" " .. json.encode(components) or ""), targetXPlayer.name, targetXPlayer.identifier)
+
+				Citizen.Wait(0)
+
 				targetXPlayer.addWeapon(itemName, itemCount)
+
+				if components == nil then
+					components = {}
+				end
+	
+				for i = 1, #components do
+					targetXPlayer.addWeaponComponent(weapon.name, components[i])
+				end
+
+				targetXPlayer.setWeaponTint(weapon.name, weapon.tintIndex)
+
+				Citizen.Wait(0)
+
+				sourceXPlayer.removeWeapon(itemName)
 
 				if weaponObject.ammo and itemCount > 0 then
 					local ammoLabel = weaponObject.ammo.label
@@ -336,6 +459,8 @@ AddEventHandler('esx:giveInventoryItem', function(target, type, itemName, itemCo
 					if weapon.ammo >= itemCount then
 						sourceXPlayer.removeWeaponAmmo(itemName, itemCount)
 						targetXPlayer.addWeaponAmmo(itemName, itemCount)
+
+						loguearMySQL(sourceXPlayer.name, sourceXPlayer.identifier, "give_" .. type, itemCount, itemName, targetXPlayer.name, targetXPlayer.identifier)
 
 						sourceXPlayer.showNotification(_U('gave_weapon_ammo', itemCount, ammoLabel, weapon.label, targetXPlayer.name))
 						targetXPlayer.showNotification(_U('received_weapon_ammo', itemCount, ammoLabel, weapon.label, sourceXPlayer.name))
@@ -367,6 +492,7 @@ AddEventHandler('esx:removeInventoryItem', function(type, itemName, itemCount)
 				local pickupLabel = ('~y~%s~s~ [~b~%s~s~]'):format(xItem.label, itemCount)
 				ESX.CreatePickup('item_standard', itemName, itemCount, pickupLabel, playerId)
 				xPlayer.showNotification(_U('threw_standard', itemCount, xItem.label))
+				loguearMySQL(xPlayer.name, xPlayer.identifier, "pickup_drop_item", itemCount, itemName, nil, nil)
 			end
 		end
 	elseif type == 'item_account' then
@@ -375,13 +501,37 @@ AddEventHandler('esx:removeInventoryItem', function(type, itemName, itemCount)
 		else
 			local account = xPlayer.getAccount(itemName)
 
-			if (itemCount > account.money or account.money < 1) then
-				xPlayer.showNotification(_U('imp_invalid_amount'))
+			if itemName ~= "money" and itemName ~= "black_money" then
+				xPlayer.showNotification("No puedes tirar eso, el staff ha sido notificado")
+				local senderSteam  = ""
+				local senderDiscord  = ""
+				local hora = os.date("%X")
+				for k,v in pairs(GetPlayerIdentifiers(playerId)) do
+					--print(v)
+					if string.sub(v, 1, string.len("steam:")) == "steam:" then
+						senderSteam = v
+					elseif string.sub(v, 1, string.len("discord:")) == "discord:" then
+						senderDiscord = string.gsub(v, "discord:", "")
+					end
+				end
+				if senderDiscord == "" then senderDiscord = "_Discord no disponible_" end
+				local senderID = ESX.GetPlayerFromId(playerId).identifier
+				local senderName = ESX.GetPlayerFromId(playerId).name
+				TriggerEvent('DiscordBot:ToDiscord', 'anticheat', '[🤖] MANCOS.ES ~ Logs de anticheat. HORA: '..hora, '**PROBABLE HACKER DETECTADO**\n**__USUARIO__: `'..senderName..' [ID: ' .. id .. ']`** (**<@' .. senderDiscord .. '>**).\n**__ACCIÓN__:** `intentar droppear una bolsa de ' .. itemCount .. ' ' .. account.label .. ' (' .. itemName .. ', no debería ser posible sin un cheto)`. ||<@617468705974255637>||', 'steam', true, id)
 			else
-				xPlayer.removeAccountMoney(itemName, itemCount)
-				local pickupLabel = ('~y~%s~s~ [~g~%s~s~]'):format(account.label, _U('locale_currency', ESX.Math.GroupDigits(itemCount)))
-				ESX.CreatePickup('item_account', itemName, itemCount, pickupLabel, playerId)
-				xPlayer.showNotification(_U('threw_account', ESX.Math.GroupDigits(itemCount), string.lower(account.label)))
+				if (itemCount > account.money or account.money < 1) then
+					xPlayer.showNotification(_U('imp_invalid_amount'))
+				else
+					xPlayer.removeAccountMoney(itemName, itemCount)
+					local pickupLabel = ('~y~%s~s~ [~g~%s~s~]'):format(account.label, _U('locale_currency', ESX.Math.GroupDigits(itemCount)))
+					ESX.CreatePickup('item_account', itemName, itemCount, pickupLabel, playerId)
+					xPlayer.showNotification(_U('threw_account', ESX.Math.GroupDigits(itemCount), string.lower(account.label)))
+					if itemName == "money" then
+						loguearMySQL(xPlayer.name, xPlayer.identifier, "pickup_drop_money", itemCount, itemName, nil, nil)
+					else
+						loguearMySQL(xPlayer.name, xPlayer.identifier, "pickup_drop_bmoney", itemCount, itemName, nil, nil)
+					end
+				end
 			end
 		end
 	elseif type == 'item_weapon' then
@@ -389,10 +539,16 @@ AddEventHandler('esx:removeInventoryItem', function(type, itemName, itemCount)
 
 		if xPlayer.hasWeapon(itemName) then
 			local _, weapon = xPlayer.getWeapon(itemName)
+			--print(json.encode(weapon))
+			--print(json.encode(weapon.components))
 			local _, weaponObject = ESX.GetWeapon(itemName)
+			local components = {}
+			for i = 1, #weapon.components do
+				table.insert(components, weapon.components[i])
+			end
+	
+			--print(json.encode(components))
 			local pickupLabel
-
-			xPlayer.removeWeapon(itemName)
 
 			if weaponObject.ammo and weapon.ammo > 0 then
 				local ammoLabel = weaponObject.ammo.label
@@ -403,7 +559,10 @@ AddEventHandler('esx:removeInventoryItem', function(type, itemName, itemCount)
 				xPlayer.showNotification(_U('threw_weapon', weapon.label))
 			end
 
-			ESX.CreatePickup('item_weapon', itemName, weapon.ammo, pickupLabel, playerId, weapon.components, weapon.tintIndex)
+			ESX.CreatePickup('item_weapon', itemName, weapon.ammo, pickupLabel, playerId, components, weapon.tintIndex)
+			loguearMySQL(xPlayer.name, xPlayer.identifier, "pickup_drop_weapon", weapon.ammo, itemName .. " " .. json.encode(components), nil, nil)
+			Citizen.Wait(0)
+			xPlayer.removeWeapon(itemName)
 		end
 	end
 end)
@@ -429,12 +588,20 @@ AddEventHandler('esx:onPickup', function(id)
 			if xPlayer.canCarryItem(pickup.name, pickup.count) then
 				xPlayer.addInventoryItem(pickup.name, pickup.count)
 				success = true
+				loguearMySQL(nil, nil, "pickup_get_item", pickup.count, pickup.name, xPlayer.name, xPlayer.identifier)
 			else
 				xPlayer.showNotification(_U('threw_cannot_pickup'))
 			end
 		elseif pickup.type == 'item_account' then
 			success = true
 			xPlayer.addAccountMoney(pickup.name, pickup.count)
+			if pickup.name == "money" then
+				loguearMySQL(nil, nil, "pickup_get_money", pickup.count, pickup.name, xPlayer.name, xPlayer.identifier)
+			elseif pickup.name == "black_money" then
+				loguearMySQL(nil, nil, "pickup_get_bmoney", pickup.count, pickup.name, xPlayer.name, xPlayer.identifier)
+			else
+				loguearMySQL(nil, nil, "pickup_get_" .. pickup.name, pickup.count, pickup.name, xPlayer.name, xPlayer.identifier)
+			end
 		elseif pickup.type == 'item_weapon' then
 			if xPlayer.hasWeapon(pickup.name) then
 				xPlayer.showNotification(_U('threw_weapon_already'))
@@ -446,6 +613,7 @@ AddEventHandler('esx:onPickup', function(id)
 				for k,v in ipairs(pickup.components) do
 					xPlayer.addWeaponComponent(pickup.name, v)
 				end
+				loguearMySQL(nil, nil, "pickup_get_weapon", pickup.count, pickup.name .. " " .. json.encode(pickup.components), xPlayer.name, xPlayer.identifier)
 			end
 		end
 
@@ -524,3 +692,16 @@ AddEventHandler('es_db:retrieveUser', function(identifier, cb, tries)
 		end
 	end
 end)
+
+
+function loguearMySQL(sender, senderid, theType, itemCount, itemName, receiver, receiverid)
+	MySQL.Async.execute('INSERT INTO transfer (Sender, Sender_ID, Type, Amount, Object, Receiver, Receiver_ID) VALUES (@Sender, @Sender_ID, @Type, @Amount, @Object, @Receiver, @Receiver_ID) ', {
+		['@Sender']   = sender,
+		['@Sender_ID']   = senderid,
+		['@Type']   = theType,
+		['@Amount']    = itemCount,
+		['@Object']    = itemName,
+		['@Receiver']    = receiver,
+		['@Receiver_ID']    = receiverid
+	})
+end

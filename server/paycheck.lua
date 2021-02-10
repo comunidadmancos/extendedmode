@@ -38,6 +38,7 @@ ESX.StartPayCheck = function()
 		end
 
 		SetTimeout(Config.PaycheckInterval, payCheck)
+		TriggerEvent('mancos:payInService')
 	end
 
 	SetTimeout(Config.PaycheckInterval, payCheck)

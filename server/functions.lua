@@ -167,8 +167,9 @@ ESX.SavePlayer = function(xPlayer, cb)
 	if ExM.DatabaseType == "es+esx" then
 		-- Nothing yet ;)
 	elseif ExM.DatabaseType == "newesx" then
-		MySQL.Async.execute('UPDATE users SET accounts = @accounts, job = @job, job_grade = @job_grade, `group` = @group, loadout = @loadout, position = @position, inventory = @inventory WHERE identifier = @identifier', {
+		MySQL.Async.execute('UPDATE users SET accounts = @accounts, `name` = @name, job = @job, job_grade = @job_grade, `group` = @group, loadout = @loadout, position = @position, inventory = @inventory WHERE identifier = @identifier', {
 			['@accounts'] = json.encode(xPlayer.getAccounts(true)),
+			['@name'] = GetPlayerName(xPlayer.playerId),
 			['@job'] = xPlayer.job.name,
 			['@job_grade'] = xPlayer.job.grade,
 			['@group'] = xPlayer.getGroup(),

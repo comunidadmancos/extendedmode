@@ -54,13 +54,35 @@ ESX.GetWeaponComponent = function(weaponName, weaponComponent)
 	weaponName = string.upper(weaponName)
 	local weapons = Config.Weapons
 
-	for k,v in ipairs(Config.Weapons) do
+	for k,v in ipairs(weapons) do
 		if v.name == weaponName then
 			for k2,v2 in ipairs(v.components) do
 				if v2.name == weaponComponent then
 					return v2
 				end
 			end
+		end
+	end
+end
+
+ESX.GetWeaponComponents = function(weaponName)
+	weaponName = string.upper(weaponName)
+	local weapons = Config.Weapons
+
+	for k,v in ipairs(weapons) do
+		if v.name == weaponName then
+			return v.components
+		end
+	end
+end
+
+ESX.GetWeaponTints = function(weaponName)
+	weaponName = string.upper(weaponName)
+	local weapons = Config.Weapons
+
+	for k,v in ipairs(weapons) do
+		if v.name == weaponName then
+			return v.tints or {}
 		end
 	end
 end
@@ -97,4 +119,14 @@ end
 
 ESX.Round = function(value, numDecimalPlaces)
 	return ESX.Math.Round(value, numDecimalPlaces)
+end
+
+ESX.TableContainsValue = function(table, value)
+	for k, v in pairs(table) do
+		if v == value then
+			return true
+		end
+	end
+
+	return false
 end
